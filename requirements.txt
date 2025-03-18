@@ -6,3 +6,4 @@ elevenlabs
 asgiref
 asyncio
 threadpoolctl
+PyAudio
