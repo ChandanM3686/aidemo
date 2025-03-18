@@ -6,4 +6,4 @@ elevenlabs
 asgiref
 threadpoolctl
 ffmpeg
-
+pydub
