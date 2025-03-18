@@ -5,13 +5,14 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, jsonify, request
 import speech_recognition as sr
+from pydub import AudioSegment  # New: for audio conversion
 from elevenlabs.client import ElevenLabs
 import google.generativeai as genai  
 from asgiref.sync import async_to_sync
 
-# Load API keys from environment variables
+# Load API keys from environment variables or hard-coded for testing
 GEMINI_API_KEY = "AIzaSyCnn1aiF0yMQnkE2DqDFFwUvefOrk-buIE"
-ELEVENLABS_API_KEY = "sk_a60d92521f60bc72b7a4cea7fec39527978c5a9ca11db413"
+ELEVENLABS_API_KEY = "sk_62c4fade1236faa6c843435da97bef80f24aa01541b7b42e"
 
 # Configure AI models
 genai.configure(api_key=GEMINI_API_KEY)
@@ -63,7 +64,7 @@ def text_to_speech(text):
             model_id="eleven_multilingual_v2",
             output_format="mp3_44100_128"
         )
-        # Check if the API returned an error instead of audio stream.
+        # Check for API error (free tier issues, etc.)
         if hasattr(audio_generator, "error"):
             print(f"TTS Error: Received error from API: {audio_generator.error}")
             return None
@@ -84,20 +85,30 @@ def voice_assistant():
     """Handles voice interaction using an uploaded audio file."""
     global conversation_history
 
-    # Check if the audio file is in the request
     if 'audio' not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
 
     audio_file = request.files['audio']
+    
+    # Convert the uploaded audio file to PCM WAV using pydub
+    try:
+        # pydub detects format automatically; export to an in-memory WAV file
+        audio_segment = AudioSegment.from_file(audio_file)
+        wav_data = audio_segment.export(format="wav")
+    except Exception as e:
+        print(f"Audio conversion error: {e}")
+        return jsonify({"error": "Audio conversion failed"}), 500
+
     recognizer = sr.Recognizer()
     try:
-        with sr.AudioFile(audio_file) as source:
+        # Use the in-memory WAV file for speech recognition
+        with sr.AudioFile(wav_data) as source:
             audio = recognizer.record(source)
         user_input = recognizer.recognize_google(audio)
     except Exception as e:
         print(f"Speech Recognition Error: {e}")
         user_input = ""
-
+    
     if not user_input:
         response_text = "How can I assist you today?"
         conversation_history.append({"role": "agent", "text": response_text})
@@ -106,7 +117,7 @@ def voice_assistant():
         response_text = generate_response(user_input)
         conversation_history.append({"role": "agent", "text": response_text})
 
-    # Convert text to speech
+    # Convert text response to speech
     audio_base64 = text_to_speech(response_text)
 
     return jsonify({
