@@ -2,13 +2,11 @@ import os
 import base64
 import threading
 import queue
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, jsonify, request
-# Remove PyAudio and Microphone usage:
-# import speech_recognition as sr
+import speech_recognition as sr
 from elevenlabs.client import ElevenLabs
-import google.generativeai as genai
+import google.generativeai as genai  
 from asgiref.sync import async_to_sync
 
 # Load API keys from environment variables
@@ -41,7 +39,11 @@ def get_audio_bytes(audio_generator, timeout=5):
     thread.start()
     thread.join(timeout)
 
-    return result_queue.get() if not thread.is_alive() else None
+    result = result_queue.get() if not thread.is_alive() else None
+    if isinstance(result, Exception):
+        print(f"TTS conversion error: {result}")
+        return None
+    return result
 
 def generate_response(user_input):
     """Get AI response from Gemini."""
@@ -61,6 +63,10 @@ def text_to_speech(text):
             model_id="eleven_multilingual_v2",
             output_format="mp3_44100_128"
         )
+        # Check if the API returned an error instead of audio stream.
+        if hasattr(audio_generator, "error"):
+            print(f"TTS Error: Received error from API: {audio_generator.error}")
+            return None
         audio_bytes = get_audio_bytes(audio_generator, timeout=5)
         if audio_bytes is None:
             print("TTS conversion timed out or failed.")
@@ -75,27 +81,32 @@ def index():
 
 @app.route("/voice", methods=["POST"])
 def voice_assistant():
-    """
-    Handles voice interaction, but now relies on text input from the request
-    rather than using a microphone.
-    """
+    """Handles voice interaction using an uploaded audio file."""
     global conversation_history
 
-    # Get text from the POST form (or JSON) instead of using a microphone
-    user_input = request.form.get("user_input") or request.json.get("user_input") if request.is_json else None
+    # Check if the audio file is in the request
+    if 'audio' not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files['audio']
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(audio_file) as source:
+            audio = recognizer.record(source)
+        user_input = recognizer.recognize_google(audio)
+    except Exception as e:
+        print(f"Speech Recognition Error: {e}")
+        user_input = ""
 
     if not user_input:
-        # If no user_input was provided, respond with a default message
         response_text = "How can I assist you today?"
         conversation_history.append({"role": "agent", "text": response_text})
     else:
-        # Add user's text to the conversation history
         conversation_history.append({"role": "user", "text": user_input})
-        # Generate AI response
         response_text = generate_response(user_input)
         conversation_history.append({"role": "agent", "text": response_text})
 
-    # Convert the response text to speech
+    # Convert text to speech
     audio_base64 = text_to_speech(response_text)
 
     return jsonify({
