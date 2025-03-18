@@ -43,6 +43,7 @@
       font-weight: 500;
       outline: none;
       box-shadow: 0 5px 15px rgba(0, 198, 255, 0.4);
+      margin: 5px;
     }
     .button:hover {
       background: #0072ff;
@@ -64,63 +65,82 @@
       width: 100%;
       outline: none;
     }
-    input[type="text"] {
-      width: 80%;
-      padding: 10px;
-      font-size: 16px;
-      border-radius: 5px;
-      border: none;
-      margin-bottom: 15px;
-    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>🎙️ AI Voice Assistant</h1>
-    <!-- Text input for user message -->
-    <input type="text" id="userInput" placeholder="Type your message here..." />
-    <!-- Button to send the text -->
-    <button class="button" onclick="startVoice()">Send</button>
+    <div>
+      <button class="button" id="recordButton">Start Recording</button>
+      <button class="button" id="stopButton" disabled>Stop Recording</button>
+    </div>
     <div class="response-box">
-      <p id="response">Enter a message and press Send.</p>
+      <p id="response">Press "Start Recording" to speak.</p>
     </div>
     <audio id="audio" controls style="display: none;"></audio>
   </div>
   <script>
-    function startVoice() {
-      const userInput = document.getElementById("userInput").value;
-      if (!userInput) {
-        document.getElementById("response").innerText = "Please enter a message.";
-        return;
+    let mediaRecorder;
+    let audioChunks = [];
+
+    document.getElementById("recordButton").addEventListener("click", () => {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.start();
+          audioChunks = [];
+          document.getElementById("response").innerText = "Recording...";
+
+          mediaRecorder.addEventListener("dataavailable", event => {
+            audioChunks.push(event.data);
+          });
+
+          mediaRecorder.addEventListener("stop", () => {
+            const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+            const formData = new FormData();
+            formData.append("audio", audioBlob, "recording.wav");
+
+            document.getElementById("response").innerText = "Processing your voice...";
+            fetch("/voice", {
+              method: "POST",
+              body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+              if (data.response) {
+                document.getElementById("response").innerText = "🤖 AI: " + data.response;
+                const audioPlayer = document.getElementById("audio");
+                if (data.audio) {
+                  audioPlayer.src = data.audio;
+                  audioPlayer.style.display = "block";
+                  audioPlayer.play();
+                } else {
+                  audioPlayer.style.display = "none";
+                }
+              } else {
+                document.getElementById("response").innerText = "❌ Error: " + data.error;
+              }
+            })
+            .catch(error => {
+              document.getElementById("response").innerText = "❌ Error: " + error;
+            });
+          });
+          // Enable Stop button and disable Record button.
+          document.getElementById("recordButton").disabled = true;
+          document.getElementById("stopButton").disabled = false;
+        })
+        .catch(err => {
+          document.getElementById("response").innerText = "Error accessing microphone: " + err;
+        });
+    });
+
+    document.getElementById("stopButton").addEventListener("click", () => {
+      if (mediaRecorder) {
+        mediaRecorder.stop();
+        document.getElementById("recordButton").disabled = false;
+        document.getElementById("stopButton").disabled = true;
       }
-      document.getElementById("response").innerText = "⏳ Processing...";
-      fetch("/voice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ user_input: userInput })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.response) {
-          document.getElementById("response").innerText = "🤖 AI: " + data.response;
-          let audioPlayer = document.getElementById("audio");
-          if (data.audio) {
-            audioPlayer.src = data.audio;
-            audioPlayer.style.display = "block";
-            audioPlayer.play();
-          } else {
-            audioPlayer.style.display = "none";
-          }
-        } else {
-          document.getElementById("response").innerText = "❌ Error: " + data.error;
-        }
-      })
-      .catch(error => {
-        document.getElementById("response").innerText = "❌ Error: " + error;
-      });
-    }
+    });
   </script>
 </body>
 </html>
