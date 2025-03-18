@@ -5,14 +5,15 @@ import queue
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, jsonify, request
-import speech_recognition as sr
+# Remove PyAudio and Microphone usage:
+# import speech_recognition as sr
 from elevenlabs.client import ElevenLabs
-import google.generativeai as genai  
+import google.generativeai as genai
 from asgiref.sync import async_to_sync
 
 # Load API keys from environment variables
-GEMINI_API_KEY ="AIzaSyCnn1aiF0yMQnkE2DqDFFwUvefOrk-buIE"
-ELEVENLABS_API_KEY ="sk_a60d92521f60bc72b7a4cea7fec39527978c5a9ca11db413"
+GEMINI_API_KEY = "AIzaSyCnn1aiF0yMQnkE2DqDFFwUvefOrk-buIE"
+ELEVENLABS_API_KEY = "sk_a60d92521f60bc72b7a4cea7fec39527978c5a9ca11db413"
 
 # Configure AI models
 genai.configure(api_key=GEMINI_API_KEY)
@@ -41,19 +42,6 @@ def get_audio_bytes(audio_generator, timeout=5):
     thread.join(timeout)
 
     return result_queue.get() if not thread.is_alive() else None
-
-def recognize_speech():
-    """Convert speech to text with timeout handling."""
-    recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.2)
-        try:
-            audio = recognizer.listen(source, timeout=2)
-            return recognizer.recognize_google(audio)
-        except sr.WaitTimeoutError:
-            return None
-        except Exception:
-            return None
 
 def generate_response(user_input):
     """Get AI response from Gemini."""
@@ -87,21 +75,27 @@ def index():
 
 @app.route("/voice", methods=["POST"])
 def voice_assistant():
-    """Handles voice interaction."""
+    """
+    Handles voice interaction, but now relies on text input from the request
+    rather than using a microphone.
+    """
     global conversation_history
 
-    # Run speech recognition synchronously
-    user_input = recognize_speech()
+    # Get text from the POST form (or JSON) instead of using a microphone
+    user_input = request.form.get("user_input") or request.json.get("user_input") if request.is_json else None
+
     if not user_input:
+        # If no user_input was provided, respond with a default message
         response_text = "How can I assist you today?"
         conversation_history.append({"role": "agent", "text": response_text})
     else:
+        # Add user's text to the conversation history
         conversation_history.append({"role": "user", "text": user_input})
-        # Generate response synchronously
+        # Generate AI response
         response_text = generate_response(user_input)
         conversation_history.append({"role": "agent", "text": response_text})
 
-    # Convert text to speech synchronously
+    # Convert the response text to speech
     audio_base64 = text_to_speech(response_text)
 
     return jsonify({
